@@ -2,6 +2,7 @@
 .*
 !/.gitignore
 !/.env_sample.env
+!/.npmrc
 
 # compiled output
 /dist

@@ -16,11 +16,11 @@
   },
   "license": "ISC",
   "dependencies": {
-    "@azure/identity": "^4.14.1",
-    "@azure/keyvault-secrets": "^4.12.0"
+    "@azure/identity": "^4.14.0",
+    "@azure/keyvault-secrets": "^4.11.2"
   },
   "devDependencies": {
-    "eslint": "^10.15.0",
+    "eslint": "^10.13.0",
     "neostandard": "^0.14.1"
   },
   "repository": {
