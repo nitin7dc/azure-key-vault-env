@@ -1,4 +1,4 @@
-const { test } = require('node:test');
+const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { SecretClient } = require('@azure/keyvault-secrets');
 
@@ -9,11 +9,44 @@ const isolateEnv = require('./helpers/isolate-env');
 
 const { createClient } = keyVaultEnv;
 
-isolateEnv('KEY_VAULT_URI');
+isolateEnv('KEY_VAULT_URI', 'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'AZURE_AUTHORITY_HOST');
+
+beforeEach(() => {
+
+    process.env.AZURE_TENANT_ID = 'tenant-id';
+    process.env.AZURE_CLIENT_ID = 'client-id';
+    process.env.AZURE_CLIENT_SECRET = 'client-secret';
+
+});
 
 test('createClient fails with a clear message when there is no vault URI', () => {
 
     assert.throws(() => createClient(), /KEY_VAULT_URI environment variable or pass `vaultUri`/);
+
+});
+
+test('createClient fails with a clear message when sign-in is not configured', () => {
+
+    process.env.KEY_VAULT_URI = 'https://from-env.vault.azure.net/';
+    delete process.env.AZURE_TENANT_ID;
+    delete process.env.AZURE_CLIENT_SECRET;
+
+    assert.throws(() => createClient(), {
+        message: 'Azure sign-in is not configured: set AZURE_TENANT_ID, AZURE_CLIENT_SECRET, or pass `credential`.'
+    });
+
+});
+
+test('createClient needs no AZURE_* variables when a credential is passed', () => {
+
+    delete process.env.AZURE_TENANT_ID;
+    delete process.env.AZURE_CLIENT_ID;
+    delete process.env.AZURE_CLIENT_SECRET;
+    const credential = { getToken: async () => ({ token: 'token', expiresOnTimestamp: Date.now() + 60_000 }) };
+
+    const client = createClient({ vaultUri: 'https://explicit.vault.azure.net/', credential });
+
+    assert.ok(client instanceof SecretClient);
 
 });
 

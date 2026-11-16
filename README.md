@@ -10,7 +10,7 @@ Manage your environment variables using azure key vault.
 If you are already using azure, manage your environment variables using key vault. It's a good service with many
 benefits. [(learn more)](https://azure.microsoft.com/en-us/services/key-vault/)
 - create a azure key vault.
-- give your app (a service principal or a managed identity) access to the key vault.
+- create a service principal with access to above key vault.
 - use this package to set up and load env.
 
 ### Installation
@@ -24,8 +24,8 @@ Requires Node.js 22 or later. Upgrading from 2.x? See [Upgrading from 2.x](#upgr
 ***
 ### Configuration
 
-The package finds your key vault through `KEY_VAULT_URI` and signs in with
-[`DefaultAzureCredential`](https://learn.microsoft.com/javascript/api/@azure/identity/defaultazurecredential).
+The package finds your key vault through `KEY_VAULT_URI` and signs in as a service principal with the three
+`AZURE_*` variables.
 
 | Variable | Description |
 | --- | --- |
@@ -34,14 +34,14 @@ The package finds your key vault through `KEY_VAULT_URI` and signs in with
 | `AZURE_CLIENT_ID` | The application (client) ID registered in the tenant |
 | `AZURE_CLIENT_SECRET` | The client secret for the registered application |
 
-The three `AZURE_*` variables are only needed to sign in as a service principal. With a managed identity on Azure, or
-after `az login` on your machine, `KEY_VAULT_URI` is enough.
-
-The identity needs permission to read secrets (the `Key Vault Secrets User` role), and to write them if it runs
-`setup` (the `Key Vault Secrets Officer` role).
+The service principal needs permission to read secrets (the `Key Vault Secrets User` role), and to write them if it
+runs `setup` (the `Key Vault Secrets Officer` role).
 
 These variables have to be in the environment before you call `init` or `setup`. The package does not read `.env`
 files itself; see [Loading a .env file](#loading-a-env-file).
+
+Outside the public Azure cloud, set `AZURE_AUTHORITY_HOST` as well, e.g. `https://login.microsoftonline.us`. To sign
+in some other way, such as a managed identity, pass your own [`credential`](#options).
 
 ***
 ### Usage
@@ -105,7 +105,7 @@ locally wins over key vault.
 | `underscoreReplacedBy` | `'0x'` | Replaces `_` in secret names. |
 | `useLocalEnv` | `false` | `init` only. Never call key vault, just check that every variable is already set. |
 | `vaultUri` | `KEY_VAULT_URI` | The key vault to use. |
-| `credential` | `DefaultAzureCredential` | Any credential from `@azure/identity`. |
+| `credential` | the `AZURE_*` variables | A credential from [`@azure/identity`](https://www.npmjs.com/package/@azure/identity), to sign in some other way. |
 | `client` | | A ready-made `SecretClient`. Takes precedence over `vaultUri` and `credential`. |
 | `logger` | | Receives progress messages, e.g. `console`. Nothing is logged without it, and secret values are never logged. |
 
@@ -217,6 +217,9 @@ import { init, setup, createClient } from 'azure-key-vault-env';
 
 - Node.js 22 or later is required.
 - `.env` is no longer loaded for you. [Load it yourself](#loading-a-env-file) before calling `init`.
+- `@azure/identity` is no longer included; the package signs in with `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and
+  `AZURE_CLIENT_SECRET`. If you relied on a managed identity, `az login` or anything else `DefaultAzureCredential`
+  did for you, install `@azure/identity` and pass `credential: new DefaultAzureCredential()`.
 - `init` rejects instead of printing the error and exiting. Add a `catch` and exit there if that is what you want.
 - Nothing is logged by default and the progress bar is gone. Pass `logger: console` to see what is happening.
 - If one variable fails to load, `init` no longer sets the others.

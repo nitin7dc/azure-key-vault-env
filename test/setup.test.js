@@ -5,7 +5,7 @@ const { setup } = require('..');
 const fakeVault = require('./helpers/fake-vault');
 const isolateEnv = require('./helpers/isolate-env');
 
-isolateEnv('KEY_VAULT_URI');
+isolateEnv('KEY_VAULT_URI', 'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET');
 
 test('saves each variable under its secret name, in order', async () => {
 

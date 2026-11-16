@@ -5,7 +5,7 @@ const { init, setup } = require('..');
 const fakeVault = require('./helpers/fake-vault');
 const isolateEnv = require('./helpers/isolate-env');
 
-isolateEnv('KEY_VAULT_URI', 'APP_DB_HOST', 'APP_DB_PASS', 'APP_API_KEY');
+isolateEnv('KEY_VAULT_URI', 'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'APP_DB_HOST', 'APP_DB_PASS', 'APP_API_KEY');
 
 test('loads missing variables from the vault', async () => {
 
