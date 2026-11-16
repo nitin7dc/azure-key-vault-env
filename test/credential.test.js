@@ -108,11 +108,36 @@ test('reports why Azure refused, without the secret', async t => {
 
 test('fails when the response has no token', async t => {
 
-    stubFetch(t, () => jsonResponse(200, { token_type: 'Bearer' }));
+    stubFetch(t, () => jsonResponse(200, { token_type: 'Bearer', expires_in: 3599 }));
 
     await assert.rejects(createCredential().getToken(SCOPE), {
-        message: 'Azure sign-in failed (HTTP 200): no access token in the response'
+        message: 'Azure sign-in failed (HTTP 200): no usable token in the response'
     });
+
+});
+
+test('fails when the token has no lifetime, rather than returning one that never expires', async t => {
+
+    for (const body of [{ access_token: 'the-token' }, { access_token: 'the-token', expires_in: 'soon' }, { access_token: 'the-token', expires_in: 0 }]) {
+
+        stubFetch(t, () => jsonResponse(200, body));
+
+        await assert.rejects(createCredential().getToken(SCOPE), {
+            message: 'Azure sign-in failed (HTTP 200): no usable token in the response'
+        });
+
+    }
+
+});
+
+test('accepts a lifetime sent as a string', async t => {
+
+    stubFetch(t, () => jsonResponse(200, { access_token: 'the-token', expires_in: '3599' }));
+    const before = Date.now();
+
+    const token = await createCredential().getToken(SCOPE);
+
+    assert.ok(token.expiresOnTimestamp >= before + 3_599_000);
 
 });
 
