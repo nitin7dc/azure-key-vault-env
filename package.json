@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "lint": "eslint .",
-    "test": "node --test \"test/**/*.test.{js,mjs}\""
+    "test": "node --test \"test/**/*.test.{js,mjs}\"",
+    "typecheck": "tsc --project test/types"
   },
   "engines": {
     "node": ">=22"
@@ -21,10 +22,24 @@
   },
   "devDependencies": {
     "eslint": "^10.15.0",
-    "neostandard": "^0.14.1"
+    "neostandard": "^0.14.1",
+    "typescript": "^6.0.3"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/nitin7dc/azure-key-vault-env.git"
-  }
+  },
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "lib"
+  ]
 }
