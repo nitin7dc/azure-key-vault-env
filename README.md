@@ -202,9 +202,9 @@ module.exports = init({ envKeys, logger: console })
 
 ```
 
-### TypeScript and ES modules
+### ES modules
 
-Type definitions are included. From an ES module:
+The package is CommonJS, and can be imported from an ES module too:
 
 ```javascript
 import { init, setup, createClient } from 'azure-key-vault-env';
@@ -223,4 +223,4 @@ import { init, setup, createClient } from 'azure-key-vault-env';
 - Only the package root can be imported; paths like `azure-key-vault-env/lib/init` no longer resolve.
 
 New in 3.0: `init` accepts `prefix` (it could not read secrets that `setup` had saved with one), the `vaultUri`,
-`credential`, `client` and `logger` options, `createClient`, results from `init` and `setup`, and TypeScript types.
+`credential`, `client` and `logger` options, `createClient`, and results from `init` and `setup`.
