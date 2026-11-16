@@ -13,9 +13,9 @@ them into `process.env` when the app starts.
 - **Nothing changes in your code.** Values arrive in `process.env`, where your app already reads them.
 - **Small.** A single dependency: the official `@azure/keyvault-secrets` client.
 
-**Contents:** [Quick start](#quick-start) · [How it works](#how-it-works) · [API](#api) ·
-[Secret names](#secret-names) · [Recipes](#recipes) · [Errors](#errors) · [Azure setup](#azure-setup) ·
-[ES modules](#es-modules) · [Upgrading from 2.x](#upgrading-from-2x)
+**Contents:** [Quick start](#quick-start) · [Run the sample](#run-the-sample) · [How it works](#how-it-works) ·
+[API](#api) · [Secret names](#secret-names) · [Recipes](#recipes) · [Errors](#errors) ·
+[Azure setup](#azure-setup) · [ES modules](#es-modules) · [Upgrading from 2.x](#upgrading-from-2x)
 
 ## Quick start
 
@@ -164,6 +164,44 @@ node --env-file=.env index.js
 
 Load your app only after `init` has finished, so that every module sees the variables. In an ES module that means
 `await import()` as above: a static `import` at the top of the file would run before `init`.
+
+## Run the sample
+
+To see a full round trip before you touch your own app, run [`sample.js`](sample.js) from this repository. It saves
+two made-up variables to your vault and loads them back into `process.env`.
+
+```
+git clone https://github.com/nitin7dc/azure-key-vault-env.git
+cd azure-key-vault-env
+npm install
+cp sample.env .env
+```
+
+Fill in the four values in `.env` ([Azure setup](#azure-setup) shows where they come from), then:
+
+```
+$ node --env-file=.env sample.js
+Saving two sample variables to Key Vault
+SAMPLE0xDB0xHOST saved
+SAMPLE0xDB0xPASS saved
+Loading them into process.env
+loaded 2 environment variables from key-vault, 0 already set
+SAMPLE_DB_HOST = db.example.com
+SAMPLE_DB_PASS = a-long-password
+```
+
+`npm run sample` runs the same command.
+
+The two secrets, `SAMPLE0xDB0xHOST` and `SAMPLE0xDB0xPASS`, stay in your vault. Running the sample again adds a new
+version of each. To remove them:
+
+```
+az keyvault secret delete --vault-name my-vault --name SAMPLE0xDB0xHOST
+az keyvault secret delete --vault-name my-vault --name SAMPLE0xDB0xPASS
+```
+
+A vault with soft delete keeps deleted secrets for a while, and the sample cannot save them again until they are
+purged or recovered.
 
 ## How it works
 

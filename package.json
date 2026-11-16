@@ -19,6 +19,7 @@
   "main": "index.js",
   "scripts": {
     "lint": "eslint .",
+    "sample": "node --env-file=.env sample.js",
     "test": "node --test \"test/**/*.test.{js,mjs}\""
   },
   "engines": {
