@@ -1,52 +1,47 @@
 # azure-key-vault-env
-Manage your environment variables using azure key vault.
 
-### Problem
-- When your application has many environment variables, they become difficult to manage.
-- Securely sharing env file with team members is time-consuming.
-- Managing multiple environments (local, demo, staging, production,...) again introduces some more challenges.
+[![npm version](https://img.shields.io/npm/v/azure-key-vault-env.svg)](https://www.npmjs.com/package/azure-key-vault-env)
+[![node](https://img.shields.io/node/v/azure-key-vault-env.svg)](https://nodejs.org)
+[![license](https://img.shields.io/npm/l/azure-key-vault-env.svg)](#license)
 
-### Solution
-If you are already using azure, manage your environment variables using key vault. It's a good service with many
-benefits. [(learn more)](https://azure.microsoft.com/en-us/services/key-vault/)
-- create a azure key vault.
-- create a service principal with access to above key vault.
-- use this package to set up and load env.
+Keep your app's environment variables in [Azure Key Vault](https://azure.microsoft.com/products/key-vault) and load
+them into `process.env` when the app starts.
 
-### Installation
+- **No more passing `.env` files around.** The values live in Key Vault. A teammate or a server needs four variables
+  to get all the others.
+- **One place for every environment.** Local, demo, staging and production can share a vault or have one each.
+- **Nothing changes in your code.** Values arrive in `process.env`, where your app already reads them.
+- **Small.** A single dependency: the official `@azure/keyvault-secrets` client.
+
+**Contents:** [Quick start](#quick-start) · [How it works](#how-it-works) · [API](#api) ·
+[Secret names](#secret-names) · [Recipes](#recipes) · [Errors](#errors) · [Azure setup](#azure-setup) ·
+[ES modules](#es-modules) · [Upgrading from 2.x](#upgrading-from-2x)
+
+## Quick start
+
+### 1. Install
 
 ```
 npm install azure-key-vault-env
 ```
 
-Requires Node.js 22 or later. Upgrading from 2.x? See [Upgrading from 2.x](#upgrading-from-2x).
+Requires Node.js 22 or later.
 
-***
-### Configuration
+### 2. Point it at your key vault
 
-The package finds your key vault through `KEY_VAULT_URI` and signs in as a service principal with the three
-`AZURE_*` variables.
+The package needs four variables: where the vault is, and a service principal to sign in with. For local work, put
+them in a `.env` file that you do not commit.
 
-| Variable | Description |
-| --- | --- |
-| `KEY_VAULT_URI` | The key vault URI, e.g. `https://my-vault.vault.azure.net/` |
-| `AZURE_TENANT_ID` | The tenant ID in Microsoft Entra ID |
-| `AZURE_CLIENT_ID` | The application (client) ID registered in the tenant |
-| `AZURE_CLIENT_SECRET` | The client secret for the registered application |
+```
+KEY_VAULT_URI=https://my-vault.vault.azure.net/
+AZURE_TENANT_ID=...
+AZURE_CLIENT_ID=...
+AZURE_CLIENT_SECRET=...
+```
 
-The service principal needs permission to read secrets (the `Key Vault Secrets User` role), and to write them if it
-runs `setup` (the `Key Vault Secrets Officer` role).
+No vault or service principal yet? [Azure setup](#azure-setup) creates both and shows where each value comes from.
 
-These variables have to be in the environment before you call `init` or `setup`. The package does not read `.env`
-files itself; see [Loading a .env file](#loading-a-env-file).
-
-Outside the public Azure cloud, set `AZURE_AUTHORITY_HOST` as well, e.g. `https://login.microsoftonline.us`. To sign
-in some other way, such as a managed identity, pass your own [`credential`](#options).
-
-***
-### Usage
-
-1. Prepare an envKeys file with all environment variables.
+### 3. List the variables your app needs
 
 ```javascript
 // env-keys.js
@@ -56,134 +51,227 @@ module.exports = {
     DB_HOST: '',
     DB_NAME: '',
     DB_USER: '',
-    DB_PASS: '',
+    DB_PASS: ''
 
     // Any other variables
 };
 ```
 
-2. Run setup once, with the values filled in, to send them to key vault.
+### 4. Save the values to Key Vault
+
+Do this once per environment, and again whenever a value changes.
 
 ```javascript
+// save-env.js
 const { setup } = require('azure-key-vault-env');
 
-const { saved } = await setup({
+setup({
     envKeys: {
         DB_HOST: 'db.example.com',
         DB_NAME: 'app',
         DB_USER: 'app',
-        DB_PASS: '...'
-    }
+        DB_PASS: 'a-long-password'
+    },
+    logger: console
 });
-
-// saved: ['DB0xHOST', 'DB0xNAME', 'DB0xUSER', 'DB0xPASS']
 ```
 
-3. Load the variables when your app starts. Only the keys matter here, the values are ignored.
+```
+$ node --env-file=.env save-env.js
+DB0xHOST saved
+DB0xNAME saved
+DB0xUSER saved
+DB0xPASS saved
+```
+
+Keep real values out of source control. If they are already in a `.env` file, you can
+[upload them from there](#upload-an-existing-env-file) instead of typing them in.
+
+### 5. Load them when your app starts
 
 ```javascript
+// index.js
 const { init } = require('azure-key-vault-env');
 const envKeys = require('./env-keys');
 
-const { loaded, skipped } = await init({ envKeys });
+init({ envKeys })
+    .then(() => {
 
-// process.env.DB_HOST, process.env.DB_NAME, ... are now set
+        // process.env.DB_HOST, process.env.DB_NAME, ... are set from here on
+        require('./app');
+
+    })
+    .catch(error => {
+
+        console.error(error.message);
+        process.exit(1);
+
+    });
 ```
-
-A variable that already has a value in `process.env` is left alone (it is listed in `skipped`), so anything you set
-locally wins over key vault.
-
-***
-### Options
-
-`init(options)` and `setup(options)` take the same options, except where noted.
-
-| Option | Default | Description |
-| --- | --- | --- |
-| `envKeys` | `{}` | `init`: object whose keys are the variables to load. `setup`: variable names mapped to the values to save. |
-| `prefix` | `''` | Put in front of every secret name, so several environments can share one key vault. |
-| `underscoreReplacedBy` | `'0x'` | Replaces `_` in secret names. |
-| `useLocalEnv` | `false` | `init` only. Never call key vault, just check that every variable is already set. |
-| `vaultUri` | `KEY_VAULT_URI` | The key vault to use. |
-| `credential` | the `AZURE_*` variables | A credential from [`@azure/identity`](https://www.npmjs.com/package/@azure/identity), to sign in some other way. |
-| `client` | | A ready-made `SecretClient`. Takes precedence over `vaultUri` and `credential`. |
-| `logger` | | Receives progress messages, e.g. `console`. Nothing is logged without it, and secret values are never logged. |
-
-`init` resolves with `{ loaded, skipped }` and `setup` with `{ saved }`.
-
-Two more exports give you the underlying `SecretClient` from `@azure/keyvault-secrets`:
-
-- `createClient({ vaultUri, credential })` creates a new client.
-- `keyVault` is the shared client for `KEY_VAULT_URI`, created the first time you use it.
-
-### Secret names
-
-Key vault secret names can only contain letters, digits and dashes, so underscores are replaced: `DB_HOST` is saved
-as `DB0xHOST`. With `prefix: 'staging-'` it becomes `staging-DB0xHOST`.
-
-Pass the same `prefix` and `underscoreReplacedBy` to `setup` and `init`.
-
-### Errors
-
-`init` and `setup` reject when something goes wrong; they never exit the process.
-
-```javascript
-try {
-
-    await init({ envKeys });
-
-} catch (error) {
-
-    console.error(error.message);
-    process.exit(1);
-
-}
-```
-
-`init` tries every variable before it fails, so the message lists all of them:
-
-```
-Failed to load 2 of 9 environment variables from key-vault:
-  - DB_PASS (secret "DB0xPASS"): A secret with (name/id) DB0xPASS was not found in this key vault.
-  - API_KEY (secret "API0xKEY"): A secret with (name/id) API0xKEY was not found in this key vault.
-```
-
-`error.errors` holds one error per variable, each with the original Azure error as its `cause`. When `init` fails,
-`process.env` is left as it was.
-
-### Loading a .env file
-
-Load it before calling `init`, with whatever you prefer:
 
 ```
 node --env-file=.env index.js
 ```
 
-or `process.loadEnvFile()`, or [dotenv](https://www.npmjs.com/package/dotenv), at the top of your entry file.
+Call `init` before you load any module that reads `process.env`.
 
-### Example with express.js
+## How it works
+
+```
+             setup                                  init
+DB_HOST  ───────────▶  secret "DB0xHOST"  ───────────────────▶  process.env.DB_HOST
+your value             in Key Vault                             in your running app
+```
+
+- Each variable is stored as one secret. Secret names cannot contain underscores, so they are
+  [replaced](#secret-names).
+- `init` only fetches variables that have no value yet. Anything already set, by your shell, a `.env` file or your
+  hosting platform, is left alone.
+- `init` fetches all missing variables in parallel, with a single sign-in.
+- `init` is all or nothing. If any variable cannot be loaded, it rejects and `process.env` stays as it was.
+
+## API
+
+### `init(options)`
+
+Loads the variables named in `envKeys` into `process.env`. Resolves with `{ loaded, skipped }`: the variables it
+fetched from Key Vault, and the ones that already had a value.
+
+### `setup(options)`
+
+Saves the variables in `envKeys` to Key Vault, one after another. Resolves with `{ saved }`, the names of the secrets
+it wrote. Saving a variable again adds a new version of its secret, so `setup` is safe to re-run.
+
+### Options
+
+`init` and `setup` take the same options, except where noted. All of them are optional.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `envKeys` | `{}` | `init`: an object whose keys are the variables to load (values are ignored). `setup`: variable names mapped to the values to save. |
+| `prefix` | `''` | Put in front of every secret name, so [several environments can share one vault](#several-environments-in-one-vault). |
+| `underscoreReplacedBy` | `'0x'` | What `_` becomes in [secret names](#secret-names). |
+| `useLocalEnv` | `false` | `init` only. Never contact Key Vault, just check that every variable is already set. See [Local development](#local-development). |
+| `logger` | none | Receives progress messages, e.g. `console`. Nothing is logged without it. Secret values are never logged. |
+| `vaultUri` | `KEY_VAULT_URI` | The vault to use. |
+| `credential` | the `AZURE_*` variables | A credential object, to [sign in another way](#sign-in-another-way). |
+| `client` | | A ready-made `SecretClient`. Takes precedence over `vaultUri` and `credential`. |
+
+### `createClient(options)` and `keyVault`
+
+For anything else you want to do with your secrets, these give you the underlying
+[`SecretClient`](https://www.npmjs.com/package/@azure/keyvault-secrets):
+
+- `createClient({ vaultUri, credential })` creates a new client. Both options are optional.
+- `keyVault` is the shared client for `KEY_VAULT_URI`, created the first time you use it.
 
 ```javascript
-/**
- * Entry File. Start with: node --env-file=.env index.js
- */
+const { keyVault } = require('azure-key-vault-env');
 
+const secret = await keyVault.getSecret('DB0xHOST');
+```
+
+## Secret names
+
+Key Vault secret names can only contain letters, digits and dashes. Underscores are replaced with `0x`, or with
+whatever you pass as `underscoreReplacedBy`, and `prefix` goes in front:
+
+| Variable | Options | Secret name |
+| --- | --- | --- |
+| `DB_HOST` | | `DB0xHOST` |
+| `DB_HOST` | `prefix: 'staging-'` | `staging-DB0xHOST` |
+| `DB_HOST` | `underscoreReplacedBy: '-'` | `DB-HOST` |
+
+Pass the same `prefix` and `underscoreReplacedBy` to `setup` and `init`.
+
+## Recipes
+
+### Several environments in one vault
+
+Give each environment its own `prefix`:
+
+```javascript
+await setup({ envKeys: stagingValues, prefix: 'staging-' });
+await setup({ envKeys: productionValues, prefix: 'production-' });
+
+// in the app
+await init({ envKeys, prefix: `${process.env.APP_ENV}-` });
+```
+
+For stricter separation, use one vault per environment and change only `KEY_VAULT_URI`.
+
+### Local development
+
+A variable that already has a value is never fetched, so you can override single values in your local `.env`:
+
+```
+KEY_VAULT_URI=https://my-vault.vault.azure.net/
+AZURE_TENANT_ID=...
+AZURE_CLIENT_ID=...
+AZURE_CLIENT_SECRET=...
+
+# used instead of the value in Key Vault
+DB_HOST=localhost
+```
+
+To work without Key Vault at all, pass `useLocalEnv`. `init` then only checks that every variable is set, and needs
+none of the four vault variables:
+
+```javascript
+await init({ envKeys, useLocalEnv: process.env.NODE_ENV === 'development' });
+```
+
+### Upload an existing `.env` file
+
+Take the values from the environment instead of writing them into a script:
+
+```javascript
+// save-env.js
+const { setup } = require('azure-key-vault-env');
+const envKeys = require('./env-keys');
+
+const values = Object.fromEntries(Object.keys(envKeys).map(name => [name, process.env[name]]));
+
+setup({ envKeys: values, logger: console });
+```
+
+```
+node --env-file=.env save-env.js
+```
+
+Afterwards, remove those values from `.env`. As long as they are set locally, `init` will not fetch them.
+
+### Sign in another way
+
+The built-in sign-in covers a service principal with a client secret. For anything else, such as a managed identity
+or your `az login` session, pass a credential from
+[`@azure/identity`](https://www.npmjs.com/package/@azure/identity):
+
+```javascript
+// npm install @azure/identity
+const { DefaultAzureCredential } = require('@azure/identity');
+
+await init({ envKeys, credential: new DefaultAzureCredential() });
+```
+
+Outside the public Azure cloud, the built-in sign-in also needs `AZURE_AUTHORITY_HOST`, e.g.
+`https://login.microsoftonline.us`.
+
+### Express
+
+```javascript
+// index.js
 const { init } = require('azure-key-vault-env');
-const envKeys = require('INSERT___PATH_TO_YOUR_ENV_KEYS_FILE');
+const envKeys = require('./env-keys');
 
-/****************************************************************************************************
- *  Load environment variables from key-vault.
- *  Target environment variables are defined in envKeys.
- ****************************************************************************************************/
-
-module.exports = init({ envKeys, logger: console })
+init({ envKeys, logger: console })
     .then(() => {
 
-        // setup your database connection or other operations
+        // set up your database connection or other operations
 
         const express = require('express');
         const app = express();
-        const port = 3000;
+        const port = process.env.PORT || 3000;
 
         app.listen(port, () => {
 
@@ -191,20 +279,70 @@ module.exports = init({ envKeys, logger: console })
 
         });
 
-        return app;
+    })
+    .catch(error => {
 
-    }).catch(error => {
-
-        console.error(error);
+        console.error(error.message);
         process.exit(1);
 
     });
-
 ```
 
-### ES modules
+## Errors
 
-The package is CommonJS, and can be imported from an ES module too:
+`init` and `setup` reject when something goes wrong. They never exit the process, so that decision stays with you.
+
+`init` tries every variable before it fails, and the message lists all the ones it could not load:
+
+```
+Failed to load 2 of 9 environment variables from key-vault:
+  - DB_PASS (secret "DB0xPASS"): A secret with (name/id) DB0xPASS was not found in this key vault.
+  - API_KEY (secret "API0xKEY"): A secret with (name/id) API0xKEY was not found in this key vault.
+```
+
+`error.errors` holds one error per variable, each with the original Azure error as its `cause`.
+
+| The message says | What to check |
+| --- | --- |
+| `Key vault URI is missing` | `KEY_VAULT_URI` is not set. Often the `.env` file was not loaded, or was loaded after `init` ran. |
+| `Azure sign-in is not configured: set ...` | The `AZURE_*` variables it names are missing. |
+| `Azure sign-in failed (HTTP ...): AADSTS...` | Microsoft Entra refused the sign-in. The `AADSTS` text gives the reason, for example a wrong or expired client secret. |
+| `was not found in this key vault` | The secret does not exist. Run `setup`, and check that `init` uses the same `prefix` and `underscoreReplacedBy`. |
+| `Forbidden`, or not authorized | The service principal lacks permission on the vault. See [Azure setup](#azure-setup). |
+| `Missing environment variables: ...` | `useLocalEnv` is on and those variables are not set locally. |
+
+## Azure setup
+
+With the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli), after `az login`:
+
+```
+# 1. Create a key vault (skip this if you have one)
+az keyvault create --name my-vault --resource-group my-resource-group --location westeurope
+
+# 2. Create a service principal that can read and write the vault's secrets
+az ad sp create-for-rbac --name my-app \
+    --role "Key Vault Secrets Officer" \
+    --scopes $(az keyvault show --name my-vault --query id --output tsv)
+```
+
+The second command prints the sign-in values. Copy them now, the secret is not shown again.
+
+| In the output | Variable |
+| --- | --- |
+| `tenant` | `AZURE_TENANT_ID` |
+| `appId` | `AZURE_CLIENT_ID` |
+| `password` | `AZURE_CLIENT_SECRET` |
+
+`KEY_VAULT_URI` is `https://my-vault.vault.azure.net/`, with your vault's name.
+
+- `Key Vault Secrets Officer` can read and write secrets, which `setup` needs. An app that only calls `init` needs
+  just `Key Vault Secrets User`.
+- If your vault uses access policies instead of role-based access, grant the permissions this way:
+  `az keyvault set-policy --name my-vault --spn <appId> --secret-permissions get set`
+
+## ES modules
+
+The package is CommonJS and can be imported from an ES module as well:
 
 ```javascript
 import { init, setup, createClient } from 'azure-key-vault-env';
@@ -212,18 +350,28 @@ import { init, setup, createClient } from 'azure-key-vault-env';
 
 `keyVault` is only available on the default import: `import keyVaultEnv from 'azure-key-vault-env'`.
 
-***
-### Upgrading from 2.x
+## Upgrading from 2.x
 
-- Node.js 22 or later is required.
-- `.env` is no longer loaded for you. [Load it yourself](#loading-a-env-file) before calling `init`.
-- `@azure/identity` is no longer included; the package signs in with `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and
-  `AZURE_CLIENT_SECRET`. If you relied on a managed identity, `az login` or anything else `DefaultAzureCredential`
-  did for you, install `@azure/identity` and pass `credential: new DefaultAzureCredential()`.
-- `init` rejects instead of printing the error and exiting. Add a `catch` and exit there if that is what you want.
-- Nothing is logged by default and the progress bar is gone. Pass `logger: console` to see what is happening.
-- If one variable fails to load, `init` no longer sets the others.
-- Only the package root can be imported; paths like `azure-key-vault-env/lib/init` no longer resolve.
+Version 3 changes a few things you may rely on:
 
-New in 3.0: `init` accepts `prefix` (it could not read secrets that `setup` had saved with one), the `vaultUri`,
-`credential`, `client` and `logger` options, `createClient`, and results from `init` and `setup`.
+- **Node.js 22 or later** is required.
+- **`.env` is no longer loaded for you.** Start your app with `node --env-file=.env`, or call `process.loadEnvFile()`
+  or [dotenv](https://www.npmjs.com/package/dotenv) before `init`.
+- **Sign-in uses the three `AZURE_*` variables only.** `@azure/identity` is no longer included. If you relied on a
+  managed identity, `az login` or anything else `DefaultAzureCredential` did for you, see
+  [Sign in another way](#sign-in-another-way).
+- **`init` rejects instead of exiting.** It used to print the error and call `process.exit(1)`. Add a `catch` and
+  exit there if that is what you want.
+- **Nothing is logged by default,** and the progress bar is gone. Pass `logger: console` to see what is happening.
+- **`init` is all or nothing.** If one variable fails to load, the others are no longer set.
+- **Only the package root can be imported.** Paths like `azure-key-vault-env/lib/init` no longer resolve.
+
+New in version 3:
+
+- `init` accepts `prefix`. Before, it could not read secrets that `setup` had saved with one.
+- The `vaultUri`, `credential`, `client` and `logger` options, and `createClient`.
+- `init` and `setup` resolve with a summary of what they did.
+
+## License
+
+ISC
