@@ -1,7 +1,21 @@
 {
   "name": "azure-key-vault-env",
   "version": "3.0.0",
-  "description": "manage your environment variables using azure key vault",
+  "description": "Keep your Node.js app's environment variables in Azure Key Vault and load them into process.env at startup. One dependency; works with require and import.",
+  "keywords": [
+    "azure",
+    "azure-key-vault",
+    "key-vault",
+    "keyvault",
+    "environment-variables",
+    "env",
+    "dotenv",
+    "secrets",
+    "secrets-management",
+    "configuration",
+    "nodejs",
+    "javascript"
+  ],
   "main": "index.js",
   "scripts": {
     "lint": "eslint .",
