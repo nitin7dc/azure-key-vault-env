@@ -25,7 +25,7 @@ them into `process.env` when the app starts.
 npm install azure-key-vault-env
 ```
 
-Requires Node.js 22 or later.
+Requires Node.js 22 or later. Works with both `require` and `import`; the steps below show each.
 
 ### 2. Point it at your key vault
 
@@ -57,9 +57,13 @@ module.exports = {
 };
 ```
 
+In an ES module, start the file with `export default {` instead of `module.exports = {`.
+
 ### 4. Save the values to Key Vault
 
 Do this once per environment, and again whenever a value changes.
+
+With `require`:
 
 ```javascript
 // save-env.js
@@ -76,6 +80,25 @@ setup({
 });
 ```
 
+With `import`:
+
+```javascript
+// save-env.js
+import { setup } from 'azure-key-vault-env';
+
+await setup({
+    envKeys: {
+        DB_HOST: 'db.example.com',
+        DB_NAME: 'app',
+        DB_USER: 'app',
+        DB_PASS: 'a-long-password'
+    },
+    logger: console
+});
+```
+
+Either way:
+
 ```
 $ node --env-file=.env save-env.js
 DB0xHOST saved
@@ -88,6 +111,8 @@ Keep real values out of source control. If they are already in a `.env` file, yo
 [upload them from there](#upload-an-existing-env-file) instead of typing them in.
 
 ### 5. Load them when your app starts
+
+With `require`:
 
 ```javascript
 // index.js
@@ -109,11 +134,36 @@ init({ envKeys })
     });
 ```
 
+With `import`:
+
+```javascript
+// index.js
+import { init } from 'azure-key-vault-env';
+import envKeys from './env-keys.js';
+
+try {
+
+    await init({ envKeys });
+
+} catch (error) {
+
+    console.error(error.message);
+    process.exit(1);
+
+}
+
+// process.env.DB_HOST, process.env.DB_NAME, ... are set from here on
+await import('./app.js');
+```
+
+Either way:
+
 ```
 node --env-file=.env index.js
 ```
 
-Call `init` before you load any module that reads `process.env`.
+Load your app only after `init` has finished, so that every module sees the variables. In an ES module that means
+`await import()` as above: a static `import` at the top of the file would run before `init`.
 
 ## How it works
 
@@ -185,6 +235,8 @@ whatever you pass as `underscoreReplacedBy`, and `prefix` goes in front:
 Pass the same `prefix` and `underscoreReplacedBy` to `setup` and `init`.
 
 ## Recipes
+
+The recipes use `require`. They work the same with `import`; see [ES modules](#es-modules).
 
 ### Several environments in one vault
 
@@ -342,13 +394,25 @@ The second command prints the sign-in values. Copy them now, the secret is not s
 
 ## ES modules
 
-The package is CommonJS and can be imported from an ES module as well:
+Everything works from an ES module, that is a `.mjs` file, or a `.js` file in a project whose `package.json` has
+`"type": "module"`:
 
 ```javascript
 import { init, setup, createClient } from 'azure-key-vault-env';
 ```
 
-`keyVault` is only available on the default import: `import keyVaultEnv from 'azure-key-vault-env'`.
+Two things differ from `require`:
+
+- **Load your app with `await import()` after `init`.** Static `import` statements run before the rest of the file,
+  so a module imported at the top would read `process.env` before `init` has filled it. Step 5 of the
+  [quick start](#quick-start) shows the pattern.
+- **`keyVault` is on the default import,** not a named one:
+
+```javascript
+import keyVaultEnv from 'azure-key-vault-env';
+
+const secret = await keyVaultEnv.keyVault.getSecret('DB0xHOST');
+```
 
 ## Upgrading from 2.x
 
