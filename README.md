@@ -19,6 +19,8 @@ benefits. [(learn more)](https://azure.microsoft.com/en-us/services/key-vault/)
 npm install azure-key-vault-env
 ```
 
+Requires Node.js 22 or later.
+
 ### Usage
 
 ***
