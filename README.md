@@ -217,6 +217,8 @@ your value             in Key Vault                             in your running 
   hosting platform, is left alone.
 - `init` fetches all missing variables in parallel, with a single sign-in.
 - `init` is all or nothing. If any variable cannot be loaded, it rejects and `process.env` stays as it was.
+- `init` and `setup` refuse a mapping that would share a secret, or a secret name Key Vault would reject,
+  before they read or write anything.
 
 ## API
 
@@ -239,7 +241,7 @@ it wrote. Saving a variable again adds a new version of its secret, so `setup` i
 | `envKeys` | `{}` | `init`: an object whose keys are the variables to load (values are ignored). `setup`: variable names mapped to the values to save. |
 | `prefix` | `''` | Put in front of every secret name, so [several environments can share one vault](#several-environments-in-one-vault). |
 | `underscoreReplacedBy` | `'0x'` | What `_` becomes in [secret names](#secret-names). |
-| `useLocalEnv` | `false` | `init` only. Never contact Key Vault, just check that every variable is already set. See [Local development](#local-development). |
+| `useLocalEnv` | `false` | `init` only. Never contact Key Vault. Every variable must be set, and secret names must still be valid. See [Local development](#local-development). |
 | `logger` | none | Receives progress messages, e.g. `console`. Nothing is logged without it. Secret values are never logged. |
 | `vaultUri` | `KEY_VAULT_URI` | The vault to use. |
 | `credential` | the `AZURE_*` variables | A credential object, to [sign in another way](#sign-in-another-way). |
@@ -271,6 +273,14 @@ whatever you pass as `underscoreReplacedBy`, and `prefix` goes in front:
 | `DB_HOST` | `underscoreReplacedBy: '-'` | `DB-HOST` |
 
 Pass the same `prefix` and `underscoreReplacedBy` to `setup` and `init`.
+
+`init` and `setup` check the name before they talk to Key Vault. It has to match `^[0-9a-zA-Z-]{1,127}$`:
+letters, digits and dashes, 1 to 127 characters, and `prefix` counts. A `prefix` of `my_` is rejected because
+of the underscore, and so is a name that comes out longer than 127 characters.
+
+Two variables must not land on one secret. Key Vault ignores case, so `db_host` and `DB_HOST` are the same
+secret (`db0xhost` and `DB0xHOST`). Replacing underscores can collide as well: with the default `0x`, `A_B` and
+`A0xB` both become `A0xB`. The error names the variables and the secret. It never includes the value.
 
 ## Recipes
 
@@ -304,8 +314,9 @@ AZURE_CLIENT_SECRET=...
 DB_HOST=localhost
 ```
 
-To work without Key Vault at all, pass `useLocalEnv`. `init` then only checks that every variable is set, and needs
-none of the four vault variables:
+To work without Key Vault at all, pass `useLocalEnv`. `init` then checks that every variable is set, and needs
+none of the four vault variables. It still rejects a colliding or invalid secret name, so a bad `prefix` shows
+up without a vault:
 
 ```javascript
 await init({ envKeys, useLocalEnv: process.env.NODE_ENV === 'development' });
@@ -400,6 +411,8 @@ Failed to load 2 of 9 environment variables from key-vault:
 | `was not found in this key vault` | The secret does not exist. Run `setup`, and check that `init` uses the same `prefix` and `underscoreReplacedBy`. |
 | `Forbidden`, or not authorized | The service principal lacks permission on the vault. See [Azure setup](#azure-setup). |
 | `Missing environment variables: ...` | `useLocalEnv` is on and those variables are not set locally. |
+| `map to the same key vault secret` | Two variables would share a secret. Their names differ only by case, or underscore replacement made them identical. Rename one, or pick another `underscoreReplacedBy`. |
+| `Invalid key vault secret names` | The mapped name is empty, longer than 127 characters, or contains something other than letters, digits and dashes. A `prefix` or `underscoreReplacedBy` of `_` (or similar) is a common cause. |
 
 ## Azure setup
 
