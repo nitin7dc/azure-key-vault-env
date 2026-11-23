@@ -5,7 +5,24 @@ const { init, setup } = require('..');
 const fakeVault = require('./helpers/fake-vault');
 const isolateEnv = require('./helpers/isolate-env');
 
-isolateEnv('KEY_VAULT_URI', 'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET', 'APP_DB_HOST', 'APP_DB_PASS', 'APP_API_KEY');
+isolateEnv(
+    'KEY_VAULT_URI',
+    'AZURE_TENANT_ID',
+    'AZURE_CLIENT_ID',
+    'AZURE_CLIENT_SECRET',
+    'APP_DB_HOST',
+    'APP_DB_PASS',
+    'APP_API_KEY',
+    'A_B',
+    'A0xB',
+    'A-B',
+    'AB',
+    'A__B',
+    'db_host',
+    'DB_HOST',
+    'APP.DB.PASS',
+    '_'
+);
 
 test('loads missing variables from the vault', async () => {
 
@@ -178,5 +195,282 @@ test('reports progress to the given logger without leaking values', async () => 
         'APP_DB_HOST is already set, skipping',
         'loaded 1 environment variables from key-vault, 1 already set'
     ]);
+
+});
+
+test('rejects a replacement collision before reading any secret', async () => {
+
+    const client = fakeVault({ APP0xDB0xHOST: 'from-the-vault', A0xB: 'from-the-vault' });
+
+    const error = await init({
+        envKeys: {
+            APP_DB_HOST: 'value-that-must-stay-secret',
+            A_B: 'other-secret-value',
+            A0xB: 'third-secret-value'
+        },
+        client
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'These environment variables map to the same key vault secret:',
+        '  - A_B and A0xB both map to "A0xB"'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value|third-secret-value|from-the-vault/);
+    assert.deepEqual(client.reads, []);
+    assert.equal(process.env.APP_DB_HOST, undefined);
+    assert.equal(process.env.A_B, undefined);
+    assert.equal(process.env.A0xB, undefined);
+
+});
+
+test('rejects a case-insensitive collision before reading any secret', async () => {
+
+    const client = fakeVault({ db0xhost: 'from-the-vault', DB0xHOST: 'from-the-vault' });
+
+    const error = await init({
+        envKeys: { db_host: 'value-that-must-stay-secret', DB_HOST: 'other-secret-value' },
+        client
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'These environment variables map to the same key vault secret:',
+        '  - db_host ("db0xhost") and DB_HOST ("DB0xHOST") are the same secret, because secret names are case-insensitive'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value|from-the-vault/);
+    assert.deepEqual(client.reads, []);
+    assert.equal(process.env.db_host, undefined);
+    assert.equal(process.env.DB_HOST, undefined);
+
+});
+
+test('reports every colliding group before reading any secret', async () => {
+
+    const client = fakeVault();
+
+    const error = await init({
+        envKeys: {
+            APP_DB_HOST: 'value-that-must-stay-secret',
+            A_B: 'other-secret-value',
+            A0xB: 'third-secret-value',
+            db_host: 'fourth-secret-value',
+            DB_HOST: 'fifth-secret-value'
+        },
+        client
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'These environment variables map to the same key vault secret:',
+        '  - A_B and A0xB both map to "A0xB"',
+        '  - db_host ("db0xhost") and DB_HOST ("DB0xHOST") are the same secret, because secret names are case-insensitive'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|secret-value|from-the-vault/);
+    assert.deepEqual(client.reads, []);
+    assert.equal(process.env.APP_DB_HOST, undefined);
+
+});
+
+test('rejects a collision that includes a variable already set in the environment', async () => {
+
+    process.env.DB_HOST = 'localhost';
+    const messages = [];
+    const logger = {
+        debug: message => messages.push(message),
+        info: message => messages.push(message)
+    };
+    const client = fakeVault({ db0xhost: 'from-the-vault', DB0xHOST: 'from-the-vault' });
+
+    const error = await init({
+        envKeys: { db_host: 'value-that-must-stay-secret', DB_HOST: '' },
+        client,
+        logger
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'These environment variables map to the same key vault secret:',
+        '  - db_host ("db0xhost") and DB_HOST ("DB0xHOST") are the same secret, because secret names are case-insensitive'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|from-the-vault|localhost/);
+    assert.deepEqual(messages, []);
+    assert.deepEqual(client.reads, []);
+    assert.equal(process.env.db_host, undefined);
+    assert.equal(process.env.DB_HOST, 'localhost');
+
+});
+
+test('rejects colliding names when useLocalEnv is set', async () => {
+
+    process.env.A_B = 'kept-locally';
+    process.env.A0xB = 'also-kept';
+
+    const error = await init({
+        envKeys: { A_B: '', A0xB: '' },
+        useLocalEnv: true
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'These environment variables map to the same key vault secret:',
+        '  - A_B and A0xB both map to "A0xB"'
+    ].join('\n'));
+    assert.equal(process.env.A_B, 'kept-locally');
+    assert.equal(process.env.A0xB, 'also-kept');
+
+});
+
+test('rejects a collision caused by a custom underscore replacement', async () => {
+
+    const client = fakeVault({ 'A-B': 'from-the-vault' });
+
+    const error = await init({
+        envKeys: { A_B: 'value-that-must-stay-secret', 'A-B': 'other-secret-value' },
+        underscoreReplacedBy: '-',
+        client
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'These environment variables map to the same key vault secret:',
+        '  - A_B and A-B both map to "A-B"'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value|from-the-vault/);
+    assert.deepEqual(client.reads, []);
+
+});
+
+test('rejects secret names with characters key vault forbids before reading', async () => {
+
+    const client = fakeVault({ APP0xDB0xHOST: 'from-the-vault' });
+
+    const error = await init({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret', 'APP.DB.PASS': 'other-secret-value' },
+        client
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        '  - APP.DB.PASS maps to "APP.DB.PASS"'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value|from-the-vault/);
+    assert.deepEqual(client.reads, []);
+    assert.equal(process.env.APP_DB_HOST, undefined);
+    assert.equal(process.env['APP.DB.PASS'], undefined);
+
+});
+
+test('rejects a prefix that puts an underscore in the secret name', async () => {
+
+    const client = fakeVault();
+
+    const error = await init({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret', APP_DB_PASS: 'other-secret-value' },
+        prefix: 'my_',
+        client
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        '  - APP_DB_HOST maps to "my_APP0xDB0xHOST"',
+        '  - APP_DB_PASS maps to "my_APP0xDB0xPASS"'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value/);
+    assert.deepEqual(client.reads, []);
+
+});
+
+test('rejects an underscore replacement that puts other invalid characters in the secret name', async () => {
+
+    const client = fakeVault();
+
+    const error = await init({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret' },
+        underscoreReplacedBy: '.',
+        client
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        '  - APP_DB_HOST maps to "APP.DB.HOST"'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret/);
+    assert.deepEqual(client.reads, []);
+
+});
+
+test('rejects a secret name longer than 127 characters before reading', async () => {
+
+    const name = 'C'.repeat(128);
+    const client = fakeVault({ APP0xDB0xHOST: 'from-the-vault' });
+
+    const error = await init({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret', [name]: 'other-secret-value' },
+        client
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        `  - ${name} maps to "${name}"`
+    ].join('\n'));
+    assert.equal(name.length, 128);
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value|from-the-vault/);
+    assert.deepEqual(client.reads, []);
+    assert.equal(process.env.APP_DB_HOST, undefined);
+    assert.equal(process.env[name], undefined);
+
+});
+
+test('rejects a prefix that pushes the secret name past 127 characters', async () => {
+
+    const prefix = 'p'.repeat(120);
+    const secretName = `${prefix}APP0xDB0xHOST`;
+    const client = fakeVault();
+
+    const error = await init({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret' },
+        prefix,
+        client
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(secretName.length, 133);
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        `  - APP_DB_HOST maps to "${secretName}"`
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret/);
+    assert.deepEqual(client.reads, []);
+
+});
+
+test('rejects an empty secret name', async () => {
+
+    const client = fakeVault();
+
+    const error = await init({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret', _: 'other-secret-value' },
+        underscoreReplacedBy: '',
+        client
+    }).then(() => assert.fail('init should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        '  - _ maps to ""'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value/);
+    assert.deepEqual(client.reads, []);
+    assert.equal(process.env.APP_DB_HOST, undefined);
+    assert.equal(process.env._, undefined);
+
+});
+
+test('accepts a mapped secret name of exactly 127 characters', async () => {
+
+    const prefix = 'p'.repeat(123);
+    const secretName = `${prefix}A0xB`;
+    const client = fakeVault({ [secretName]: 'kept' });
+
+    assert.equal(secretName.length, 127);
+
+    const result = await init({ envKeys: { A_B: '' }, prefix, client });
+
+    assert.deepEqual(client.reads, [secretName]);
+    assert.equal(process.env.A_B, 'kept');
+    assert.deepEqual(result, { loaded: ['A_B'], skipped: [] });
 
 });

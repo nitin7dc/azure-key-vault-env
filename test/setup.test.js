@@ -86,3 +86,232 @@ test('reports progress to the given logger without leaking values', async () => 
     assert.deepEqual(messages, ['APP0xDB0xHOST saved', 'APP0xDB0xPASS saved']);
 
 });
+
+test('rejects a replacement collision before writing any secret', async () => {
+
+    const client = fakeVault();
+
+    const error = await setup({
+        envKeys: {
+            APP_DB_HOST: 'value-that-must-stay-secret',
+            A_B: 'other-secret-value',
+            A0xB: 'third-secret-value'
+        },
+        client
+    }).then(() => assert.fail('setup should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'These environment variables map to the same key vault secret:',
+        '  - A_B and A0xB both map to "A0xB"'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value|third-secret-value/);
+    assert.deepEqual(client.writes, []);
+    assert.equal(client.secrets.size, 0);
+
+});
+
+test('rejects a case-insensitive collision before writing any secret', async () => {
+
+    const client = fakeVault();
+
+    const error = await setup({
+        envKeys: { db_host: 'value-that-must-stay-secret', DB_HOST: 'other-secret-value' },
+        client
+    }).then(() => assert.fail('setup should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'These environment variables map to the same key vault secret:',
+        '  - db_host ("db0xhost") and DB_HOST ("DB0xHOST") are the same secret, because secret names are case-insensitive'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value/);
+    assert.deepEqual(client.writes, []);
+    assert.equal(client.secrets.size, 0);
+
+});
+
+test('reports every colliding group and every variable in a group before writing', async () => {
+
+    const client = fakeVault();
+
+    const error = await setup({
+        envKeys: {
+            AB: 'value-that-must-stay-secret',
+            A_B: 'other-secret-value',
+            A__B: 'third-secret-value',
+            db_host: 'fourth-secret-value',
+            DB_HOST: 'fifth-secret-value'
+        },
+        underscoreReplacedBy: '',
+        client
+    }).then(() => assert.fail('setup should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'These environment variables map to the same key vault secret:',
+        '  - AB, A_B and A__B all map to "AB"',
+        '  - db_host ("dbhost") and DB_HOST ("DBHOST") are the same secret, because secret names are case-insensitive'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|secret-value/);
+    assert.deepEqual(client.writes, []);
+    assert.equal(client.secrets.size, 0);
+
+});
+
+test('rejects a collision caused by a custom underscore replacement', async () => {
+
+    const client = fakeVault();
+
+    const error = await setup({
+        envKeys: { A_B: 'value-that-must-stay-secret', 'A-B': 'other-secret-value' },
+        underscoreReplacedBy: '-',
+        client
+    }).then(() => assert.fail('setup should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'These environment variables map to the same key vault secret:',
+        '  - A_B and A-B both map to "A-B"'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value/);
+    assert.deepEqual(client.writes, []);
+    assert.equal(client.secrets.size, 0);
+
+});
+
+test('rejects secret names with characters key vault forbids before writing', async () => {
+
+    const client = fakeVault();
+
+    const error = await setup({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret', 'APP.DB.PASS': 'other-secret-value' },
+        client
+    }).then(() => assert.fail('setup should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        '  - APP.DB.PASS maps to "APP.DB.PASS"'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value/);
+    assert.deepEqual(client.writes, []);
+    assert.equal(client.secrets.size, 0);
+
+});
+
+test('rejects a prefix that puts an underscore in the secret name', async () => {
+
+    const client = fakeVault();
+
+    const error = await setup({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret', APP_DB_PASS: 'other-secret-value' },
+        prefix: 'my_',
+        client
+    }).then(() => assert.fail('setup should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        '  - APP_DB_HOST maps to "my_APP0xDB0xHOST"',
+        '  - APP_DB_PASS maps to "my_APP0xDB0xPASS"'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value/);
+    assert.deepEqual(client.writes, []);
+    assert.equal(client.secrets.size, 0);
+
+});
+
+test('rejects an underscore replacement that puts other invalid characters in the secret name', async () => {
+
+    const client = fakeVault();
+
+    const error = await setup({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret' },
+        underscoreReplacedBy: '.',
+        client
+    }).then(() => assert.fail('setup should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        '  - APP_DB_HOST maps to "APP.DB.HOST"'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret/);
+    assert.deepEqual(client.writes, []);
+    assert.equal(client.secrets.size, 0);
+
+});
+
+test('rejects a secret name longer than 127 characters before writing', async () => {
+
+    const name = 'C'.repeat(128);
+    const client = fakeVault();
+
+    const error = await setup({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret', [name]: 'other-secret-value' },
+        client
+    }).then(() => assert.fail('setup should have rejected'), error => error);
+
+    assert.equal(name.length, 128);
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        `  - ${name} maps to "${name}"`
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value/);
+    assert.deepEqual(client.writes, []);
+    assert.equal(client.secrets.size, 0);
+
+});
+
+test('rejects a prefix that pushes the secret name past 127 characters', async () => {
+
+    const prefix = 'p'.repeat(120);
+    const secretName = `${prefix}APP0xDB0xHOST`;
+    const client = fakeVault();
+
+    const error = await setup({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret' },
+        prefix,
+        client
+    }).then(() => assert.fail('setup should have rejected'), error => error);
+
+    assert.equal(secretName.length, 133);
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        `  - APP_DB_HOST maps to "${secretName}"`
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret/);
+    assert.deepEqual(client.writes, []);
+    assert.equal(client.secrets.size, 0);
+
+});
+
+test('rejects an empty secret name', async () => {
+
+    const client = fakeVault();
+
+    const error = await setup({
+        envKeys: { APP_DB_HOST: 'value-that-must-stay-secret', _: 'other-secret-value' },
+        underscoreReplacedBy: '',
+        client
+    }).then(() => assert.fail('setup should have rejected'), error => error);
+
+    assert.equal(error.message, [
+        'Invalid key vault secret names. Names must match /^[0-9a-zA-Z-]{1,127}$/:',
+        '  - _ maps to ""'
+    ].join('\n'));
+    assert.doesNotMatch(error.message, /value-that-must-stay-secret|other-secret-value/);
+    assert.deepEqual(client.writes, []);
+    assert.equal(client.secrets.size, 0);
+
+});
+
+test('accepts a mapped secret name of exactly 127 characters', async () => {
+
+    const prefix = 'p'.repeat(123);
+    const secretName = `${prefix}A0xB`;
+    const client = fakeVault();
+
+    assert.equal(secretName.length, 127);
+
+    const result = await setup({ envKeys: { A_B: 'kept' }, prefix, client });
+
+    assert.deepEqual(result, { saved: [secretName] });
+    assert.deepEqual(client.writes, [secretName]);
+    assert.equal(client.secrets.get(secretName), 'kept');
+
+});
